@@ -49,33 +49,11 @@ def best_tle(entries: list, t_dt: datetime, max_age_days=7):
     age_days = abs((t_dt - cand_epoch).total_seconds()) / 86400.0
     return None if age_days > max_age_days else cand_sat
 
-@st.cache_data(ttl=86400, show_spinner="Downloading Space Weather data...")
-def fetch_kp_data_v2():
-    """Fetches and processes historical Space Weather data from CelesTrak."""
-    try:
-        # Optimized: Fetching the 5-year archive instead of the full 60-year history
-        url = "https://celestrak.org/SpaceData/SW-Last5Years.csv"
-        df = pd.read_csv(url)
-        
-        # Optimized: Explicitly defining the format speeds up parsing drastically
-        df['DATE'] = pd.to_datetime(df['DATE'], format='%Y-%m-%d').dt.tz_localize('UTC')
-        
-        kp_cols = ['KP1', 'KP2', 'KP3', 'KP4', 'KP5', 'KP6', 'KP7', 'KP8']
-        for col in kp_cols:
-            df[col] = pd.to_numeric(df[col], errors='coerce')
-            
-        df['Kp_Avg'] = df[kp_cols].mean(axis=1) / 10.0
-        
-        return df[['DATE', 'Kp_Avg']]
-    except Exception as e:
-        st.error(f"Failed to fetch Space Weather data: {e}")
-        return None
-
 # --- Website Page Config ---
 st.set_page_config(page_title="Orbital Tracker", layout="wide")
 
-st.title("🛰️ Satellite TLE Data & Kp Index Explorer")
-st.markdown("Extract historical orbital elements, calculate 3D proximity, and overlay geomagnetic activity (Kp Index).")
+st.title("🛰️ Satellite TLE Data Explorer")
+st.markdown("Extract historical orbital elements and calculate 3D proximity directly from Space-Track.org")
 
 # --- Initialize Session State ---
 if 'data_ready' not in st.session_state:
@@ -116,7 +94,7 @@ if run_button:
         st.error("Please enter your Space-Track credentials in the sidebar.")
     else:
         try:
-            with st.spinner("Fetching data from Space-Track and CelesTrak..."):
+            with st.spinner("Fetching data from Space-Track..."):
                 st_client = SpaceTrackClient(identity=ST_USER, password=ST_PASS)
                 sat_list = [s.strip() for s in sat_input.split(",") if s.strip()]
                 ref_id = ref_sat_input.strip()
@@ -124,7 +102,6 @@ if run_button:
                 
                 tle_data = st_client.gp_history(norad_cat_id=sat_list, epoch=drange, format='tle')
                 ref_tle_data = st_client.gp_history(norad_cat_id=ref_id, epoch=drange, format='tle')
-                kp_df = fetch_kp_data_v2()
 
             if not tle_data or not ref_tle_data:
                 st.warning("Insufficient data found for these satellites in the selected range.")
@@ -160,15 +137,6 @@ if run_button:
                     else:
                         plot_data[nid]['dist'].append(None)
 
-                # Filter Kp Data to the selected timeframe
-                if kp_df is not None:
-                    start_dt_utc = pd.to_datetime(start_date).tz_localize('UTC')
-                    end_dt_utc = pd.to_datetime(end_date).tz_localize('UTC') + pd.Timedelta(days=1)
-                    mask = (kp_df['DATE'] >= start_dt_utc) & (kp_df['DATE'] < end_dt_utc)
-                    kp_df_filtered = kp_df.loc[mask]
-                else:
-                    kp_df_filtered = None
-
                 # Compile CSV Data
                 all_sats_data = []
                 for sat in sat_list:
@@ -185,7 +153,6 @@ if run_button:
 
                 # Save everything to Session State
                 st.session_state['plot_data'] = plot_data
-                st.session_state['kp_df'] = kp_df_filtered
                 st.session_state['sat_list'] = sat_list
                 st.session_state['ref_id'] = ref_id
                 st.session_state['csv_data'] = csv_data
@@ -200,7 +167,7 @@ if run_button:
 if st.session_state.get('data_ready'):
     st.markdown("### 🔎 Interactive Zoom Control")
     
-    # 1. Native Streamlit Slider (Simple Straight Line)
+    # 1. Native Streamlit Slider
     selected_range = st.slider(
         "Drag the handles to zoom in on a specific timeframe:",
         min_value=st.session_state['slider_min'],
@@ -211,18 +178,17 @@ if st.session_state.get('data_ready'):
     )
 
     plot_data = st.session_state['plot_data']
-    kp_df = st.session_state['kp_df']
     sat_list = st.session_state['sat_list']
     ref_id = st.session_state['ref_id']
     csv_data = st.session_state['csv_data']
 
-    # 2. Build Plotly Visuals
+    # 2. Build Plotly Visuals (Reduced to 8 Rows)
     fig = make_subplots(
-        rows=9, cols=1, shared_xaxes=True, vertical_spacing=0.03,
+        rows=8, cols=1, shared_xaxes=True, vertical_spacing=0.03,
         subplot_titles=(
             "Inclination (°)", "RAAN (°)", "Eccentricity", "Arg of Perigee (°)", 
             "Mean Anomaly (°)", "Mean Motion", "Longitude (°)", 
-            f"3D Distance to {ref_id} (km)", "Daily Average Kp Index"
+            f"3D Distance to {ref_id} (km)"
         )
     )
 
@@ -241,18 +207,24 @@ if st.session_state.get('data_ready'):
                 mode='lines+markers', line=dict(color=current_color), marker=dict(color=current_color)    
             ), row=row, col=1)
 
-    if kp_df is not None and not kp_df.empty:
-        fig.add_trace(go.Scatter(
-            x=kp_df['DATE'].dt.to_pydatetime(), y=kp_df['Kp_Avg'],
-            name="Avg Kp Index", mode='lines+markers', line=dict(width=2), showlegend=True
-        ), row=9, col=1)
-
-    fig.update_layout(height=2000, hovermode="x unified", template="plotly_dark", margin=dict(t=80, b=50, l=50, r=50))
+    fig.update_layout(height=1800, hovermode="x unified", template="plotly_dark", margin=dict(t=80, b=50, l=50, r=50))
     
     # 3. Apply the Streamlit slider boundaries to the Plotly graph dynamically
     fig.update_xaxes(
         range=[selected_range[0], selected_range[1]], 
         showline=True, linewidth=1, linecolor='gray', mirror=True
+    )
+    
+    # Render the interactive range slider on the bottom-most plot (Row 8)
+    fig.update_xaxes(
+        rangeslider=dict(
+            visible=True, 
+            thickness=0.02,                 
+            bgcolor="rgba(0,0,0,0)",        
+            bordercolor="rgba(0,0,0,0)",    
+            borderwidth=0                   
+        ), 
+        row=8, col=1
     )
     
     fig.update_yaxes(showline=True, linewidth=1, linecolor='gray', mirror=True)
