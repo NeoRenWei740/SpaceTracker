@@ -215,18 +215,7 @@ if st.session_state.get('data_ready'):
         showline=True, linewidth=1, linecolor='gray', mirror=True
     )
     
-    # Render the interactive range slider on the bottom-most plot (Row 8)
-    fig.update_xaxes(
-        rangeslider=dict(
-            visible=True, 
-            thickness=0.02,                 
-            bgcolor="rgba(0,0,0,0)",        
-            bordercolor="rgba(0,0,0,0)",    
-            borderwidth=0                   
-        ), 
-        row=8, col=1
-    )
-    
+    # Rangeslider removed completely.
     fig.update_yaxes(showline=True, linewidth=1, linecolor='gray', mirror=True)
     fig.update_annotations(yshift=15) 
     
