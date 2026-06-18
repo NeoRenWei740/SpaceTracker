@@ -49,17 +49,23 @@ def best_tle(entries: list, t_dt: datetime, max_age_days=7):
     age_days = abs((t_dt - cand_epoch).total_seconds()) / 86400.0
     return None if age_days > max_age_days else cand_sat
 
-@st.cache_data(ttl=86400)
+@st.cache_data(ttl=86400, show_spinner="Downloading Space Weather data...")
 def fetch_kp_data_v2():
     """Fetches and processes historical Space Weather data from CelesTrak."""
     try:
-        url = "https://celestrak.org/SpaceData/SW-All.csv"
+        # Optimized: Fetching the 5-year archive instead of the full 60-year history
+        url = "https://celestrak.org/SpaceData/SW-Last5Years.csv"
         df = pd.read_csv(url)
-        df['DATE'] = pd.to_datetime(df['DATE']).dt.tz_localize('UTC')
+        
+        # Optimized: Explicitly defining the format speeds up parsing drastically
+        df['DATE'] = pd.to_datetime(df['DATE'], format='%Y-%m-%d').dt.tz_localize('UTC')
+        
         kp_cols = ['KP1', 'KP2', 'KP3', 'KP4', 'KP5', 'KP6', 'KP7', 'KP8']
         for col in kp_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
+            
         df['Kp_Avg'] = df[kp_cols].mean(axis=1) / 10.0
+        
         return df[['DATE', 'Kp_Avg']]
     except Exception as e:
         st.error(f"Failed to fetch Space Weather data: {e}")
@@ -71,7 +77,7 @@ st.set_page_config(page_title="Orbital Tracker", layout="wide")
 st.title("🛰️ Satellite TLE Data & Kp Index Explorer")
 st.markdown("Extract historical orbital elements, calculate 3D proximity, and overlay geomagnetic activity (Kp Index).")
 
-# Initialize Session State
+# --- Initialize Session State ---
 if 'data_ready' not in st.session_state:
     st.session_state['data_ready'] = False
 
@@ -163,7 +169,7 @@ if run_button:
                 else:
                     kp_df_filtered = None
 
-                # Compile CSV
+                # Compile CSV Data
                 all_sats_data = []
                 for sat in sat_list:
                     if plot_data[sat]['epoch']:
